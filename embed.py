@@ -100,6 +100,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train Poincare Embeddings')
     parser.add_argument('-dim', help='Embedding dimension', type=int)
     parser.add_argument('-dset', help='Dataset to embed', type=str)
+    parser.add_argument('-fset', help='Features dataset', type=str)
     parser.add_argument('-fout', help='Filename where to store model', type=str)
     parser.add_argument('-distfn', help='Distance function', type=str)
     parser.add_argument('-lr', help='Learning rate', type=float)
@@ -122,7 +123,8 @@ if __name__ == '__main__':
     logging.basicConfig(level=log_level, format='%(message)s', stream=sys.stdout)
     idx, objects = slurp(opt.dset)
 
-    # create adjacency list for evaluation
+
+    # create adjacency list for evaluation, key is node id and values are adjacent nodes ids
     adjacency = ddict(set)
     for i in range(len(idx)):
         s, o, _ = idx[i]

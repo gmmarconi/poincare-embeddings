@@ -74,7 +74,7 @@ class RiemannianSGD(Optimizer):
                 d_p = p.grad.data
                 if lr is None:
                     lr = group['lr']
-                d_p = group['rgrad'](p, d_p)
+                d_p = group['rgrad'](p, d_p) # calls the gradient
                 group['retraction'](p, d_p, lr)
 
         return loss

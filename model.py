@@ -139,15 +139,14 @@ class GraphDataset(Dataset):
         self.objects = objects
         self.max_tries = self.nnegs * self._ntries
 
-        self._weights = ddict(lambda: ddict(int))
+        self._weights = ddict(lambda: ddict(int))   # default int is 0
         self._counts = np.ones(len(objects), dtype=np.float)
         for i in range(idx.size(0)):
-            t, h, w = self.idx[i]
+            t, h, w = [int(x) for x in self.idx[i]]
             self._counts[h] += w
             self._weights[t][h] += w
-        self._weights = dict(self._weights)
-        nents = int(np.array(list(self._weights.keys())).max() + 1)
-        assert len(objects) == nents, 'Number of objects do no match'
+        self._weights = dict(self._weights) # dict of dict, each subdict represents an item (indexed by "objects") and contains the PARENTS
+
 
         if unigram_size > 0:
             c = self._counts ** self._dampening
@@ -170,7 +169,9 @@ class SNGraphDataset(GraphDataset):
     model_name = '%s_%s_dim%d'
 
     def __getitem__(self, i):
-        t, h, _ = self.idx[i]
+        t, h, _ = [int(x) for x in self.idx[i]]
+        t = int(t)
+        h = int(h)
         negs = set()
         ntries = 0
         nnegs = self.nnegs
@@ -196,7 +197,7 @@ class SNGraphDataset(GraphDataset):
     def initialize(cls, distfn, opt, idx, objects, max_norm=1):
         conf = []
         model_name = cls.model_name % (opt.dset, opt.distfn, opt.dim)
-        data = cls(idx, objects, opt.negs)
+        data = cls(idx, objects, opt.negs) # istantiates a GraphDataset object
         model = SNEmbedding(
             len(data.objects),
             opt.dim,
@@ -205,3 +206,135 @@ class SNGraphDataset(GraphDataset):
         )
         data.objects = objects
         return model, data, model_name, conf
+
+
+class GraphDatasetSupervised(Dataset):
+    _ntries = 10
+    _dampening = 1
+
+    def __init__(self, idx, objects, xtr, nnegs, unigram_size=1e8, similarity="gram", margin=False):
+        print('Indexing data')
+        self.idx = idx
+        self.nnegs = nnegs
+        self.burnin = False
+        self.objects = objects
+        self.max_tries = self.nnegs * self._ntries
+
+        # Supervised info
+        self.xtr = xtr
+        self.nlabels = flatten(objects).count(-1)
+        if similarity is "gram":
+            print("Computing Gram matrix")
+            self.gramian = th.mm(self.xtr, self.xtr)
+            self.gramian_ord, self.gramian_ord_idx = th.sort(self.gramian, dim=0, descending=margin)
+        elif similarity is "distance":
+            print("Distance similarity not implemented")
+
+        self._weights = ddict(lambda: ddict(int))  # default int is 0, weights of edges (usually equal to 1)
+        self._counts = np.ones(len(objects), dtype=np.float)
+        for i in range(idx.size(0)):
+            t, h, w = [int(x) for x in self.idx[i]]
+            self._counts[h] += w
+            self._weights[t][h] += w
+        self._weights = dict(self._weights)
+
+
+        if unigram_size > 0:
+            c = self._counts ** self._dampening
+            self.unigram_table = choice(
+                len(objects),
+                size=int(unigram_size),
+                p=(c / c.sum())
+            )
+
+    def __len__(self):
+        return self.idx.size(0)
+
+    @classmethod
+    def collate(cls, batch):
+        inputs, targets = zip(*batch)
+        return Variable(th.cat(inputs, 0)), Variable(th.cat(targets, 0))
+
+
+class SNGraphDatasetsupervised(GraphDataset):
+    model_name = '%s_%s_dim%d'
+
+    def __getitem__(self, i):
+
+        # when i corresponds to a label
+        if self.objects[i, 3] == -1:
+            t, h, _ = self.idx[i]
+            negs = set()
+            ntries = 0
+            nnegs = self.nnegs
+            if self.burnin:
+                nnegs *= 0.1
+            while ntries < self.max_tries and len(negs) < nnegs:
+                if self.burnin:
+                    n = randint(0, len(self.unigram_table))
+                    n = int(self.unigram_table[n])
+                else:
+                    n = randint(0, self.nlabels)
+                if n not in self._weights[t]:
+                    negs.add(n)
+                ntries += 1
+            if len(negs) == 0:
+                negs.add(t)
+            ix = [t, h] + list(negs)
+            while len(ix) < nnegs + 2:
+                ix.append(ix[randint(2, len(ix))])
+            return th.LongTensor(ix).view(1, len(ix)), th.zeros(1).long()
+        # when i corresponds to an instance
+        elif self.objects[i,3] >= 0:
+            t, h, _ = [int(x) for x in self.idx[i]]
+            t = int(t) # child
+            h = int(h) # parent
+            negs = set()
+            ntries = 0
+            nnegs = self.nnegs
+            if self.burnin:
+                nnegs *= 0.1
+            while ntries < self.max_tries and len(negs) < nnegs:
+                if self.burnin:
+                    n = randint(0, len(self.unigram_table))
+                    n = int(self.unigram_table[n])
+                else:
+                    n = self.gramian_ord_idx[i, ntries]
+                if n not in self._weights[t]:
+                    negs.add(n)
+                ntries += 1
+            if len(negs) == 0:
+                negs.add(t)
+            ix = [t, h] + list(negs)
+            while len(ix) < nnegs + 2:
+                ix.append(ix[randint(2, len(ix))])
+            return th.LongTensor(ix).view(1, len(ix)), th.zeros(1).long()
+
+        else:
+            print("SNGraphDatasetsupervised>> Error, requested item is not a label nor an instance")
+            return False
+
+    @classmethod
+    def initialize(cls, distfn, opt, idx, objects, max_norm=1):
+        conf = []
+        model_name = cls.model_name % (opt.dset, opt.distfn, opt.dim)
+        data = cls(idx, objects, opt.negs)  # istantiates a GraphDataset object
+        model = SNEmbedding(
+            len(data.objects),
+            opt.dim,
+            dist=distfn,
+            max_norm=max_norm
+        )
+        data.objects = objects
+        return model, data, model_name, conf
+
+
+def flatten(seq,container=None):
+    if container is None:
+        container = []
+    for s in seq:
+        if hasattr(s,'__iter__'):
+            flatten(s,container)
+        else:
+            container.append(s)
+    return container
