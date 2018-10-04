@@ -10,6 +10,7 @@ from itertools import count
 from collections import defaultdict as ddict
 import numpy as np
 import torch as th
+import networkx as nx
 
 
 def parse_seperator(line, length, sep='\t'):
@@ -49,6 +50,13 @@ def intmap_to_list(d):
     assert not any(x is None for x in arr)
     return arr
 
+def Gintdict_to_list(d, Graph):
+    arr = [None for _ in range(len(d))]
+    for v, i in d.items():
+        arr[i] = { **{'label':v}, **G.nodes[int(v)] }
+    assert not any(x is None for x in arr)
+    return arr
+
 
 def slurp(fin, fparse=parse_tsv, symmetrize=False):
     ecount = count()
@@ -67,3 +75,24 @@ def slurp(fin, fparse=parse_tsv, symmetrize=False):
     objects = intmap_to_list(dict(enames))
     print(f'slurp: objects={len(objects)}, edges={len(idx)}')
     return idx, objects
+
+def slurp_pickled_nx(graphpath=None, featurespath=None):
+    G = nx.read_gpickle(graphpath)
+    Xtr = np.load(featurespath)
+    ecount = count()
+    enames = ddict(ecount.__next__)
+    subs = []
+    for line in nx.generate_edgelist(G, data=False):
+        i, j, w = parse_space(line)
+        print(i, j, w)
+        if i == j:
+            continue
+        subs.append((enames[i], enames[j], w))
+    idx = th.from_numpy(np.array(subs, dtype=np.int))
+    objects = Gintdict_to_list(dict(enames), G)
+    print(f'slurp: objects={len(objects)}, edges={len(idx)}')
+    return idx, objects
+
+
+
+
