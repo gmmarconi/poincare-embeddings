@@ -12,7 +12,6 @@ import numpy as np
 import torch as th
 import networkx as nx
 
-
 def parse_seperator(line, length, sep='\t'):
     d = line.strip().split(sep)
     if len(d) == length:
@@ -53,7 +52,7 @@ def intmap_to_list(d):
 def Gintdict_to_list(d, Graph):
     arr = [None for _ in range(len(d))]
     for v, i in d.items():
-        arr[i] = { **{'label':v}, **G.nodes[int(v)] }
+        arr[i] = { **{'label':v}, **Graph.nodes[int(v)] }
     assert not any(x is None for x in arr)
     return arr
 

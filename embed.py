@@ -13,7 +13,7 @@ from torch.autograd import Variable
 from collections import defaultdict as ddict
 import torch.multiprocessing as mp
 import model, train, rsgd
-from data import slurp
+from data import slurp, slurp_pickled_nx
 from rsgd import RiemannianSGD
 from sklearn.metrics import average_precision_score
 import gc
@@ -100,6 +100,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train Poincare Embeddings')
     parser.add_argument('-dim', help='Embedding dimension', type=int)
     parser.add_argument('-dset', help='Dataset to embed', type=str)
+    parser.add_argument('-f', help='Dataset features', type=str)
     parser.add_argument('-fset', help='Features dataset', type=str)
     parser.add_argument('-fout', help='Filename where to store model', type=str)
     parser.add_argument('-distfn', help='Distance function', type=str)
@@ -121,7 +122,10 @@ if __name__ == '__main__':
         log_level = logging.INFO
     log = logging.getLogger('poincare-nips17')
     logging.basicConfig(level=log_level, format='%(message)s', stream=sys.stdout)
-    idx, objects = slurp(opt.dset)
+    if opt.dset[-4:] == '.tsv':
+        idx, objects = slurp(opt.dset)
+    elif opt.dset[-2:] == '.p':
+        idx, objects = slurp_pickled_nx(opt.dset, opt.f)
 
 
     # create adjacency list for evaluation, key is node id and values are adjacent nodes ids
@@ -146,7 +150,11 @@ if __name__ == '__main__':
         raise ValueError(f'Unknown distance function {opt.distfn}')
 
     # initialize model and data
-    model, data, model_name, conf = model.SNGraphDataset.initialize(distfn, opt, idx, objects)
+    if opt.dset[-4:] == '.tsv':
+        model, data, model_name, conf = model.SNGraphDataset.initialize(distfn, opt, idx, objects)
+
+    elif opt.dset[-2:] == '.p':
+        model, data, model_name, conf = model.SNGraphDatasetSupervised.initialize(distfn, opt, idx, objects, xtr=np.load(opt.f))
 
     # Build config string for log
     conf = [

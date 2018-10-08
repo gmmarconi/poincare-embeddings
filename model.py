@@ -221,17 +221,18 @@ class GraphDatasetSupervised(Dataset):
         self.max_tries = self.nnegs * self._ntries
 
         # Supervised info
-        self.xtr = xtr
-        self.nlabels = flatten(objects).count(-1)
+        self.xtr = th.from_numpy(xtr)
+        self.nlabels = sum(x['feature'] == -1 for x in objects)
         if similarity is "gram":
             print("Computing Gram matrix")
-            self.gramian = th.mm(self.xtr, self.xtr)
-            self.gramian_ord, self.gramian_ord_idx = th.sort(self.gramian, dim=0, descending=margin)
+            self.gramian = th.mm(self.xtr, th.transpose(self.xtr, 0, 1))
+            self.gramian_ord, self.gramian_ord_idx = th.sort(self.gramian, dim=1, descending=margin)
         elif similarity is "distance":
             print("Distance similarity not implemented")
 
         self._weights = ddict(lambda: ddict(int))  # default int is 0, weights of edges (usually equal to 1)
         self._counts = np.ones(len(objects), dtype=np.float)
+        print("Creating weights list")
         for i in range(idx.size(0)):
             t, h, w = [int(x) for x in self.idx[i]]
             self._counts[h] += w
@@ -256,14 +257,16 @@ class GraphDatasetSupervised(Dataset):
         return Variable(th.cat(inputs, 0)), Variable(th.cat(targets, 0))
 
 
-class SNGraphDatasetsupervised(GraphDataset):
+class SNGraphDatasetSupervised(GraphDatasetSupervised):
     model_name = '%s_%s_dim%d'
 
     def __getitem__(self, i):
 
         # when i corresponds to a label
-        if self.objects[i, 3] == -1:
+        if self.objects[i]['feature'] == -1:
             t, h, _ = self.idx[i]
+            t = int(t)
+            h = int(h)
             negs = set()
             ntries = 0
             nnegs = self.nnegs
@@ -275,7 +278,7 @@ class SNGraphDatasetsupervised(GraphDataset):
                     n = int(self.unigram_table[n])
                 else:
                     n = randint(0, self.nlabels)
-                if n not in self._weights[t]:
+                if n not in self._weights[t]:   # does not contain all indexes
                     negs.add(n)
                 ntries += 1
             if len(negs) == 0:
@@ -285,7 +288,7 @@ class SNGraphDatasetsupervised(GraphDataset):
                 ix.append(ix[randint(2, len(ix))])
             return th.LongTensor(ix).view(1, len(ix)), th.zeros(1).long()
         # when i corresponds to an instance
-        elif self.objects[i,3] >= 0:
+        elif self.objects[i]['feature'] >= 0:
             t, h, _ = [int(x) for x in self.idx[i]]
             t = int(t) # child
             h = int(h) # parent
@@ -299,7 +302,10 @@ class SNGraphDatasetsupervised(GraphDataset):
                     n = randint(0, len(self.unigram_table))
                     n = int(self.unigram_table[n])
                 else:
-                    n = self.gramian_ord_idx[i, ntries]
+                    max_val = self.gramian.shape[0]
+                    if self.objects[i]['feature'] > max_val:
+                        print("bleep check indexes")
+                    n = self.gramian_ord_idx[self.objects[i]['feature'], min(ntries, max_val)]  # we select an instance node, not a label node
                 if n not in self._weights[t]:
                     negs.add(n)
                 ntries += 1
@@ -315,10 +321,12 @@ class SNGraphDatasetsupervised(GraphDataset):
             return False
 
     @classmethod
-    def initialize(cls, distfn, opt, idx, objects, max_norm=1):
+    def initialize(cls, distfn, opt, idx, objects, max_norm=1, xtr=None):
+        if xtr is None:
+            print("Please supply a feature matrix")
         conf = []
         model_name = cls.model_name % (opt.dset, opt.distfn, opt.dim)
-        data = cls(idx, objects, opt.negs)  # istantiates a GraphDataset object
+        data = cls(idx, objects, xtr, opt.negs)  # istantiates a GraphDataset object
         model = SNEmbedding(
             len(data.objects),
             opt.dim,
@@ -327,14 +335,3 @@ class SNGraphDatasetsupervised(GraphDataset):
         )
         data.objects = objects
         return model, data, model_name, conf
-
-
-def flatten(seq,container=None):
-    if container is None:
-        container = []
-    for s in seq:
-        if hasattr(s,'__iter__'):
-            flatten(s,container)
-        else:
-            container.append(s)
-    return container
