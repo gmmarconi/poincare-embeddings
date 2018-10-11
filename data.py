@@ -52,7 +52,7 @@ def intmap_to_list(d):
 def Gintdict_to_list(d, Graph):
     arr = [None for _ in range(len(d))]
     for v, i in d.items():
-        arr[i] = { **{'label':v}, **Graph.nodes[int(v)] }
+        arr[i] = { **{'name':v}, **Graph.nodes[v] }
     assert not any(x is None for x in arr)
     return arr
 
@@ -83,7 +83,6 @@ def slurp_pickled_nx(graphpath=None, featurespath=None):
     subs = []
     for line in nx.generate_edgelist(G, data=False):
         i, j, w = parse_space(line)
-        print(i, j, w)
         if i == j:
             continue
         subs.append((enames[i], enames[j], w))

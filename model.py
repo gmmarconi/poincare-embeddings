@@ -262,11 +262,10 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
 
     def __getitem__(self, i):
 
-        # when i corresponds to a label
-        if self.objects[i]['feature'] == -1:
-            t, h, _ = self.idx[i]
-            t = int(t)
-            h = int(h)
+        t, h, _ = [int(x) for x in self.idx[i]]  # t: child, h:parent
+
+        # t corresponds to a label
+        if self.objects[t]['feature'] == -1:
             negs = set()
             ntries = 0
             nnegs = self.nnegs
@@ -287,11 +286,9 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
             while len(ix) < nnegs + 2:
                 ix.append(ix[randint(2, len(ix))])
             return th.LongTensor(ix).view(1, len(ix)), th.zeros(1).long()
-        # when i corresponds to an instance
-        elif self.objects[i]['feature'] >= 0:
-            t, h, _ = [int(x) for x in self.idx[i]]
-            t = int(t) # child
-            h = int(h) # parent
+        # t corresponds to an instance
+        elif self.objects[t]['feature'] >= 0:
+            t, h, _ = [int(x) for x in self.idx[i]] #t: child, h:parent
             negs = set()
             ntries = 0
             nnegs = self.nnegs
