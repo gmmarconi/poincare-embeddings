@@ -128,7 +128,7 @@ class SNEmbedding(Embedding):
 
 
 class GraphDataset(Dataset):
-    _ntries = 10
+    _ntries = 100
     _dampening = 1
 
     def __init__(self, idx, objects, nnegs, unigram_size=1e8):
@@ -276,7 +276,7 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
                     n = randint(0, len(self.unigram_table))
                     n = int(self.unigram_table[n])
                 else:
-                    n = randint(0, self.nlabels)
+                    n = randint(0, self.nlabels) # check if in self_weights
                 if n not in self._weights[t]:   # does not contain all indexes
                     negs.add(n)
                 ntries += 1

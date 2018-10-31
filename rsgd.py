@@ -59,7 +59,7 @@ class RiemannianSGD(Optimizer):
         defaults = dict(lr=lr, rgrad=rgrad, retraction=retraction)
         super(RiemannianSGD, self).__init__(params, defaults)
 
-    def step(self, lr=None):
+    def step(self, lr=None, v=False):
         """Performs a single optimization step.
 
         Arguments:
@@ -73,7 +73,9 @@ class RiemannianSGD(Optimizer):
                     continue
                 d_p = p.grad.data
                 if lr is None:
-                    lr = group['lr']
+                    lr = self.param_groups[0]['lr']
+                if v:
+                    print(lr)
                 d_p = group['rgrad'](p, d_p) # calls the gradient
                 group['retraction'](p, d_p, lr)
 

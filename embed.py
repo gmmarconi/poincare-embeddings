@@ -8,12 +8,14 @@
 import torch as th
 import numpy as np
 import logging
+import pickle
 import argparse
 from torch.autograd import Variable
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from collections import defaultdict as ddict
 import torch.multiprocessing as mp
 import model, train, rsgd
-from data import slurp, slurp_pickled_nx
+from data import slurp, slurp_pickled_nx, parse_space
 from rsgd import RiemannianSGD
 from sklearn.metrics import average_precision_score
 import gc
@@ -45,7 +47,8 @@ def ranking(types, model, distfn):
     return np.mean(ranks), np.mean(ap_scores)
 
 
-def control(queue, log, types, data, fout, distfn, nepochs, processes):
+def control(queue, log, types, data, fout, distfn, nepochs, processes, scheduler=None, burnin=0):
+
     min_rank = (np.Inf, -1)
     max_map = (0, -1)
     while True:
@@ -66,6 +69,8 @@ def control(queue, log, types, data, fout, distfn, nepochs, processes):
             }, fout)
             # compute embedding quality
             mrank, mAP = ranking(types, model, distfn)
+            # if scheduler and (epoch > burnin):
+            #     scheduler.step(mAP)
             if mrank < min_rank[0]:
                 min_rank = (mrank, epoch)
             if mAP > max_map[0]:
@@ -123,7 +128,7 @@ if __name__ == '__main__':
     log = logging.getLogger('poincare-nips17')
     logging.basicConfig(level=log_level, format='%(message)s', stream=sys.stdout)
     if opt.dset[-4:] == '.tsv':
-        idx, objects = slurp(opt.dset)
+        idx, objects = slurp(opt.dset) #, fparse=parse_space)
     elif opt.dset[-2:] == '.p':
         idx, objects = slurp_pickled_nx(opt.dset, opt.f)
 
@@ -174,11 +179,14 @@ if __name__ == '__main__':
         retraction=opt.retraction,
         lr=opt.lr,
     )
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=20, verbose=True, threshold=0.001)
+
 
     # if nproc == 0, run single threaded, otherwise run Hogwild
     if opt.nproc == 0:
         train.train(model, data, optimizer, opt, log, 0)
     else:
+
         queue = mp.Manager().Queue()
         model.share_memory()
         processes = []
@@ -192,7 +200,11 @@ if __name__ == '__main__':
 
         ctrl = mp.Process(
             target=control,
-            args=(queue, log, adjacency, data, opt.fout, distfn, opt.epochs, processes)
+            args=(queue, log, adjacency, data, opt.fout, distfn, opt.epochs, processes, scheduler, opt.burnin)
         )
         ctrl.start()
         ctrl.join()
+
+    graph_savename = opt.fout[:-4] + '_graph.p'
+    graph_to_save = { 'objects': objects, 'edges': idx.numpy()}
+    pickle.dump( graph_to_save, open(graph_savename, 'wb'))

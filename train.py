@@ -49,7 +49,12 @@ def train(model, data, optimizer, opt, log, rank=1, queue=None):
             preds = model(inputs)
             loss = model.loss(preds, targets, size_average=True)
             loss.backward()
-            optimizer.step(lr=lr)
+            if epoch < opt.burnin:
+                optimizer.step(lr=lr)
+            # elif epoch % 100 ==0:
+            #     optimizer.step(v=True)
+            else:
+                optimizer.step()
             epoch_loss.append(loss.item())
         if rank == 1:
             emb = None
