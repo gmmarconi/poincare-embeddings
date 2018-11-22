@@ -9,6 +9,7 @@
 import numpy as np
 from numpy.random import choice, randint
 import torch as th
+from kernelregressionutils import sqdist
 from torch import nn
 from torch.autograd import Function, Variable
 from torch.utils.data import Dataset
@@ -221,14 +222,17 @@ class GraphDatasetSupervised(Dataset):
         self.max_tries = self.nnegs * self._ntries
 
         # Supervised info
-        self.xtr = th.from_numpy(xtr)
+        self.xtr = xtr
         self.nlabels = sum(x['feature'] == -1 for x in objects)
+        if self.nlabels == 0:
+            self.nlabels = len(objects)
         if similarity is "gram":
             print("Computing Gram matrix")
-            self.gramian = th.mm(self.xtr, th.transpose(self.xtr, 0, 1))
-            self.gramian_ord, self.gramian_ord_idx = th.sort(self.gramian, dim=1, descending=margin)
+            self.gramian = self.xtr.dot(self.xtr)
+            self.gramian_ord_idx = np.argsort(self.gramian, axis=1)
         elif similarity is "distance":
-            print("Distance similarity not implemented")
+            self.gramian = sqdist(self.xtr, self.xtr)
+            self.gramian_ord_idx = np.argsort(-self.gramian, axis=1)
 
         self._weights = ddict(lambda: ddict(int))  # default int is 0, weights of edges (usually equal to 1)
         self._counts = np.ones(len(objects), dtype=np.float)
@@ -265,7 +269,7 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
         t, h, _ = [int(x) for x in self.idx[i]]  # t: child, h:parent
 
         # t corresponds to a label
-        if self.objects[t]['feature'] == -1:
+        if self.objects[t]['feature'] == -1 or self.checkIfleastSimilarL(t, h):
             negs = set()
             ntries = 0
             nnegs = self.nnegs
@@ -297,14 +301,11 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
             while ntries < self.max_tries and len(negs) < nnegs:
                 if self.burnin:
                     n = randint(0, len(self.unigram_table))
-                    n = int(self.unigram_table[n])
+                    less_odx = int(self.unigram_table[n])
                 else:
-                    max_val = self.gramian.shape[0]
-                    if self.objects[i]['feature'] > max_val:
-                        print("bleep check indexes")
-                    n = self.gramian_ord_idx[self.objects[i]['feature'], min(ntries, max_val)]  # we select an instance node, not a label node
-                if n not in self._weights[t]:
-                    negs.add(n)
+                    less_odx = self.lessSimilarThan(child_idxo=t, parent_idxo=h)
+                if less_odx not in self._weights[t]:
+                    negs.add(less_odx)
                 ntries += 1
             if len(negs) == 0:
                 negs.add(t)
@@ -318,12 +319,12 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
             return False
 
     @classmethod
-    def initialize(cls, distfn, opt, idx, objects, max_norm=1, xtr=None):
+    def initialize(cls, distfn, opt, idx, objects, max_norm=1, xtr=None, similarity='gram'):
         if xtr is None:
             print("Please supply a feature matrix")
         conf = []
         model_name = cls.model_name % (opt.dset, opt.distfn, opt.dim)
-        data = cls(idx, objects, xtr, opt.negs)  # istantiates a GraphDataset object
+        data = cls(idx, objects, xtr, opt.negs, similarity=similarity)  # istantiates a GraphDataset object
         model = SNEmbedding(
             len(data.objects),
             opt.dim,
@@ -332,3 +333,36 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
         )
         data.objects = objects
         return model, data, model_name, conf
+
+    def feature2objectsidx(self, idxf):
+        """Returns the 'objects' index associated to the 'feature' index"""
+        return [i for (i, v) in enumerate(self.objects) if v['feature'] ==  idxf][0]
+
+    def objects2featureidx(self, idxo):
+        """Returns the 'feature' index associated to the 'feature' index"""
+        return self.objects[idxo]['feature']
+
+    def lessSimilarThan(self, child_idxo, parent_idxo):
+        """Returns a node less similar to parent than child
+
+        :child: objects idx of the child
+        :parent: objects idx of the parent
+        """
+        parent_idxf = self.objects2featureidx(parent_idxo)
+        child_idxf = self.objects2featureidx(child_idxo)
+        parent_similarity_index = int(np.argwhere(parent_idxf == self.gramian_ord_idx[child_idxf,:])[0])
+        if parent_similarity_index < 1:
+            print("lessSimilarThan(): the least similar, parent_idxf: %d\t child_idxf: %d" % (parent_idxf, child_idxf))
+        less_fidx = np.random.choice(self.gramian_ord_idx[child_idxf,:parent_similarity_index])
+        less_odx = [i for (i, v) in enumerate(self.objects) if v['feature'] == less_fidx][0]
+        return less_odx
+
+    def checkIfleastSimilarL(self, child_idxo, parent_idxo):
+        """Checks if the parent is the least similar node in feature space"""
+        parent_idxf = self.objects2featureidx(parent_idxo)
+        child_idxf = self.objects2featureidx(child_idxo)
+        parent_similarity_index = int(np.argwhere(parent_idxf == self.gramian_ord_idx[child_idxf,:])[0])
+        if parent_similarity_index < 1:
+            return True
+        else:
+            return False

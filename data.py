@@ -83,6 +83,8 @@ def slurp_pickled_nx(graphpath=None, featurespath=None):
     subs = []
     for line in nx.generate_edgelist(G, data=False):
         i, j, w = parse_space(line)
+        if i.isalnum(): i = int(i)
+        if j.isalnum(): j = int(j)
         if i == j:
             continue
         subs.append((enames[i], enames[j], w))
