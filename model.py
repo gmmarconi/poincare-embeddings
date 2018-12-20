@@ -14,6 +14,8 @@ from torch import nn
 from torch.autograd import Function, Variable
 from torch.utils.data import Dataset
 from collections import defaultdict as ddict
+import random
+
 
 eps = 1e-5
 
@@ -339,15 +341,18 @@ class SNGraphDatasetSupervised(GraphDatasetSupervised):
         return [i for (i, v) in enumerate(self.objects) if v['feature'] ==  idxf][0]
 
     def objects2featureidx(self, idxo):
-        """Returns the 'feature' index associated to the 'feature' index"""
+        """Returns the feature matrix index associated to the 'objects' index"""
         return self.objects[idxo]['feature']
 
-    def lessSimilarThan(self, child_idxo, parent_idxo):
+    def lessSimilarThan(self, child_idxo, parent_idxo, include_pure_nodes=False):
         """Returns a node less similar to parent than child
 
         :child: objects idx of the child
         :parent: objects idx of the parent
         """
+        if include_pure_nodes and (random.random() < 0.5):
+            return randint(0, self.nlabels)
+
         parent_idxf = self.objects2featureidx(parent_idxo)
         child_idxf = self.objects2featureidx(child_idxo)
         parent_similarity_index = int(np.argwhere(parent_idxf == self.gramian_ord_idx[child_idxf,:])[0])

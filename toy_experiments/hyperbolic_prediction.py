@@ -8,12 +8,16 @@ from data import slurp, slurp_pickled_nx
 import seaborn as sns; sns.set()
 import torch as th
 import networkx as nx
+import pickle
 
 def poin2lor(embPoin):
     """Converts a set of poiints from Poincaré to Lorentz representation"""
     sqnorms = np.sum(embPoin ** 2, axis=1)[:, np.newaxis]
     embLor = np.hstack((1+sqnorms, 2*embPoin)) / (1-sqnorms)
     return embLor
+
+def lor2poin(embPoin):
+    return embPoin[:,1:] / (embPoin[:, 0, np.newaxis] + 1)
 
 def lorentzGeodesic(Y0, Y1):
     """Returns the set of geodesic distances between two set of points Y0 and Y1
@@ -107,6 +111,60 @@ def gradLorentz(Ytr, Y):
     H = steepestAscent(Ytr, Y).T # row indexes training points, col indexes dim
     return tangentSpaceProj(H, Y)
 
+def print_embed(graph, embed, dims, printables, extra):
+    print("Embedding matrix shape:", embed.shape)
+    colors = np.zeros(len(model['objects']))
+    for idx in range(len(colors)):
+        if model['objects'][idx]['feature'] == -1:
+            colors[idx] = 1
+        else:
+            colors[idx] = -1
+
+    plt.figure(figsize=(12, 12))
+    ax = plt.gca()
+    for idx in range(len(colors)):
+        x = embed[idx, dims[0]]
+        y = embed[idx, dims[1]]
+
+        if model['objects'][idx]['feature'] == -1:
+            fsize = 10
+            size = 200
+            marker = 'X'
+            color = 'orange'
+            a = 0.4
+        else:
+            fsize = 20
+            size = 200
+            marker = '.'
+            color = 'purple'
+            a = 1
+
+        if model['objects'][idx]['name'] in printables:
+            displacement = np.sign(np.random.random(2) - 0.5) * 0.003
+            size = 100
+            color = 'red'
+            ax.scatter(x=x, y=y, c=color, alpha=0.8, s=size, edgecolor='black', marker='X')
+            plt.text(x + (displacement[0]), y + (displacement[1]), '*' + str(model['objects'][idx]['name']),
+                     fontsize=fsize)
+        else:
+            ax.scatter(x=x, y=y, c=color, alpha=a, s=size, edgecolor='black', marker=marker, )
+
+    for edge in graph.edges:
+        x0 = embed[edge[0], dims[0]]
+        y0 = embed[edge[0], dims[1]]
+
+        x1 = embed[edge[1], dims[0]]
+        y1 = embed[edge[1], dims[1]]
+
+        plt.plot([x0, x1], [y0, y1], 'b', alpha=0.05)
+
+    ax.scatter(x=extra[:, dims[0]], y=extra[:, dims[1]], c='orange', alpha=0.6, s=250, edgecolor='black', marker='^')
+
+    ax.add_artist(plt.Circle((0, 0), 1, color='Blue', fill=False))
+    plt.show()
+
+
+
 def mAP(node, node_embed, graph, embed, embed_labels):
     neighs = [n for n in graph.neighbors(node)]
     D = lorentzGeodesic(embed, node_embed)
@@ -138,8 +196,9 @@ if __name__ == '__main__':
     elif opt.dset[-2:] == '.p':
         graph = nx.read_gpickle(opt.dset)
         #idx, objects = slurp_pickled_nx(opt.dset, opt.f)
-    print("Grapht type:", type(graph))
+    print("Graph type:", type(graph))
     adjacency = np.load(opt.fset)
+    adjacency -= np.eye(adjacency.shape[0])
     model = th.load(opt.embed) # dict_keys(['model', 'epoch', 'objects'])
     # edges = graph['edges']
     embedPoin = model['model']['lt.weight'].numpy()
@@ -150,7 +209,7 @@ if __name__ == '__main__':
     print("Embedding matrix shape:", embed.shape)
 
     # Split training and test data
-    testList = [101, 25, 35, 45, 50, 65, 80, 94, 100]
+    testList = [101, 25 , 35, 45, 50, 65, 80, 94, 100]
     #fathers: 16->101, 5->25, 7->35, 8->45, 9->50, 11->65, 13->80, 15->94, 16->100
 
     xtest =[]; ytest = []; ctest =[]
@@ -170,20 +229,12 @@ if __name__ == '__main__':
     ytrain = np.array(ytrain)
     ytest  = np.array(ytest)
 
-
-    # #### DEBUG
-    # xtrain = np.vstack((xtrain[0], xtrain[0]))
-    # ytrain = np.vstack((ytrain[0], ytrain[0]))
-    # xtest  = np.vstack((xtrain[0], xtrain[0]))
-    # ytest = np.vstack((ytrain[0], ytrain[0]))
-
     valIdx = np.random.choice(xtrain.shape[0], int(xtrain.shape[0]*0.2))
     X = {'xtr':xtrain, 'xval':xtrain[valIdx]}
     Y = {'ytr':ytrain, 'yval':ytrain[valIdx]}
 
 
     loss = Loss('squaredLorentzGeodesic')
-
 
     #sigmaKRLS, lambdaKRLS = kru.KRLSvec_crossval(X=X, Y=Y)
 
@@ -234,5 +285,11 @@ for idx, y in enumerate(ypred):
     print("Embedding Nearest 10 neighbours of node %d: " % (ctest[idx]))
     print(np.array(c[Dtrue_sort[:10]]).T)
     print("Distance to nearest neigh: %f" % (D[Dtrue_sort[0]]), end='\n\n\n\n')
+    print_embed(graph, embedPoin, dims=[0, 1], printables=[4, 5, 6, 7, 8, 9, 1, 0], extra=lor2poin(y))
+    print_embed(graph, embedPoin, dims=[2, 3], printables=[4, 5, 6, 7, 8, 9, 1, 0], extra=lor2poin(y))
+    print_embed(graph, embedPoin, dims=[4, 5], printables=[4, 5, 6, 7, 8, 9, 1, 0], extra=lor2poin(y))
+    break
+
+
     # acc = mAP(ctest[idx], y, graph, embed, ctrain)
 
